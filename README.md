@@ -35,28 +35,105 @@ All four phases are implemented. Offline tests pass and the Next.js app builds; 
 
 ## Setup
 
+### Prerequisites
+
+| Tool | Version | Notes |
+|---|---|---|
+| Node.js | 20 or newer | `node -v` to check |
+| pnpm | 9 or newer | `corepack enable` installs it, or `npm i -g pnpm` |
+| FalkorDB | Cloud free tier, or Docker | Cloud needs no install — just a connection string |
+
+### 1. Clone and install
+
 ```bash
+git clone https://github.com/amit-gupta18/slackline.git
+cd slackline
+
+# Installs every workspace package (apps/api, apps/web, apps/mcp, packages/*)
 pnpm install
-cp .env.example .env        # paste FALKOR_URL from the FalkorDB Cloud UI
-pnpm smoke                  # connection + GRAPH.COPY + algo.* capability probe
-pnpm seed                   # wipe, generate (seed 42), ingest
-pnpm demo                   # the end-to-end Phase 1 demo
-pnpm test                   # acceptance tests A1-A11
-pnpm lint:boundary          # proves MongoDB is not on the decision path
-
-pnpm dev:api                # API on :4000
-pnpm dev:web                # UI  on :3001
-pnpm mcp                    # MCP server on stdio
 ```
 
-Only `FALKOR_URL` is required. The demo and the tests run with `MONGODB_URI` unset — the product does not need an account database to work.
+### 2. Get a FalkorDB instance
 
-Local fallback, if the hosted tier forbids `GRAPH.COPY`:
+**Option A — FalkorDB Cloud (recommended, no Docker).** Create a free instance at [app.falkordb.cloud](https://app.falkordb.cloud) and copy its connection string.
+
+**Option B — local Docker.**
 
 ```bash
+# 6379 = the database, 3000 = FalkorDB's own graph browser UI
 docker run -d -p 6379:6379 -p 3000:3000 falkordb/falkordb:latest
-# then FALKOR_URL=redis://localhost:6379
+# Your connection string is then: redis://localhost:6379
 ```
+
+### 3. Configure the environment
+
+```bash
+# Copy the template. .env is git-ignored — the connection string is a credential.
+cp .env.example .env
+```
+
+Then edit `.env`:
+
+```bash
+FALKOR_URL=...          # REQUIRED — connection string from step 2
+FALKOR_PASSWORD=...     # only if the password is not in the URL, or contains @ : / # ? %
+FALKOR_USERNAME=...     # only if the username is not in the URL
+GRAPH_NAME=slackline    # graph key; the tests use slackline_test
+PORT=4000               # API port
+WEB_ORIGIN=http://localhost:3001   # the UI origin the API allows (CORS)
+```
+
+`FALKOR_URL` is the only required value. `MONGODB_URI` and `JWT_SECRET` can stay empty — MongoDB is the account shell only and is **off the decision path**.
+
+### 4. Verify the connection and load data
+
+```bash
+# Probes the connection, GRAPH.COPY (used for plan forks) and the algo.* procedures.
+# If this fails, nothing else will work — fix the connection string first.
+pnpm smoke
+
+# Wipes the graph, generates the synthetic schedule (deterministic, seed 42)
+# and ingests it: 54 flights, 12 aircraft, 19 crew, 11 airports + a fog disruption at DEL.
+# Re-run this any time to reset the graph to its starting state.
+pnpm seed
+```
+
+### 5. Run the app
+
+Open two terminals:
+
+```bash
+# Terminal 1 — Express API on http://localhost:4000 (health check: /health)
+pnpm dev:api
+
+# Terminal 2 — Next.js UI on http://localhost:3001
+pnpm dev:web
+```
+
+Open **http://localhost:3001**, then click **Trace cascade (FOG at DEL)** → pick a delayed flight to see its evidence path → **Find containment plans** → **Confirm & commit** the verified plan.
+
+### 6. Optional — CLI demo, MCP server, tests
+
+```bash
+pnpm demo            # end-to-end run in the terminal: cascade → evidence → plans → commit
+pnpm mcp             # MCP server over stdio (9 tools) for an LLM agent; see .mcp.json.example
+pnpm test            # acceptance suite against the live graph (uses GRAPH_NAME + "_test")
+pnpm typecheck       # TypeScript across all workspaces
+pnpm lint:boundary   # proves MongoDB is never imported on the decision path
+```
+
+### Deployment
+
+| Part | Host | Settings |
+|---|---|---|
+| API (`apps/api`) | Render — `render.yaml` blueprint in the repo root | Secrets: `FALKOR_URL` (+ password/username if needed), `WEB_ORIGIN` = the frontend URL |
+| UI (`apps/web`) | Vercel — Root Directory `apps/web` | `NEXT_PUBLIC_API_URL` = the API URL, no trailing slash |
+
+### Troubleshooting
+
+- **`pnpm smoke` cannot connect** — check the host/port, and put a password with special characters in `FALKOR_PASSWORD` rather than in the URL.
+- **UI loads but shows no data / CORS errors** — the API is not running, or `WEB_ORIGIN` does not exactly match the UI's origin.
+- **Numbers look different from a previous run** — the graph has been changed by a commit; run `pnpm seed` to reset.
 
 ---
 
@@ -270,27 +347,6 @@ Postgres + Prisma was considered and rejected: the only thing it buys over Mongo
 
 ---
 
-## Tests
-
-| ID | Asserts |
-|---|---|
-| A1 | Indexes and constraints exist; duplicate `Flight.id` rejected |
-| A2 | Relaxation reaches fixpoint in < 50 waves; final wave changes nothing |
-| A3 | Hand-built 5-flight chain with slack 20 yields exactly `[120, 100, 80, 60, 40]` |
-| A4 | A flight with a delayed aircraft **and** a delayed crew inbound takes the larger |
-| A5 | Fork mutations never reach the live graph; fork deleted even when the body throws |
-| A6 | Cancelling one mid-rotation leg trips INV-3; cancelling the pair does not |
-| A7 | Pushing a crew past `duty_limit_min` trips INV-1 |
-| A8 | The chosen plan scores strictly better than the do-nothing baseline |
-| A9 | A decision verified at an older revision is refused at commit |
-| A10 | **With FalkorDB unreachable, every path fails. No fallback produces a plan.** |
-| A11 | Same seed → identical schedule, cascade and chosen plan |
-
-**A10 is the ablation test** and the direct answer to hackathon Rule 3. It runs with the graph pointed at a dead host and asserts the product is inert: no cache, no default, no degraded mode. It also greps the source for forbidden datastore imports. **Never delete it, never let it be skipped.**
-
-A skipped integration suite proves nothing — `pnpm test` prints a loud warning when `FALKOR_URL` is unset.
-
----
 
 ## Declared limitations
 
@@ -306,27 +362,6 @@ Honesty about what this is, because the judging criteria include understanding a
 8. **Decision support, not autopilot.** The invariants only cover what is modelled. Bad input data can still produce a plan that passes verification.
 9. **Not a replacement for operations solvers.** Lufthansa's OPSD is a mature deployed system. Slackline's position is: a way to *see* the whole chain, *explain* every suggestion, and *test* it before acting.
 
----
-
-## How I used Claude Code
-
-This project was built with Claude Code as a coding assistant, as permitted by hackathon Rule 11.
-
-- **Specification.** `docs/kickoff.md` and `docs/AGENTS.md` were drafted and iterated with Claude, including the stack decision (Express/TS over FastAPI) and the MongoDB boundary rules.
-- **Implementation.** The `packages/graph` modules, the Cypher in `queries.ts`, the Express routes and the test suite were written with Claude Code.
-- **Verification.** An independent plain-TypeScript oracle was used to check the generator against the same four invariants the Cypher enforces. It caught three real bugs before any database was involved: a negative crew-rest slack caused by tightening a hand-off to `min_turn` when `min_rest` is longer, a rotation overrunning the 23:00 day boundary, and over-eager crew chunking.
-- **Author's understanding.** The graph model, the relaxation loop, the four invariants, the fork/verify flow and the staleness guard are explained in this README and in `docs/kickoff.md`, and I can walk through each without notes.
-
----
-
-## Further reading
-
-- [`docs/kickoff.md`](docs/kickoff.md) — the full technical specification
-- [`docs/AGENTS.md`](docs/AGENTS.md) — rules and hard constraints for anyone (human or AI) working in this repo
-- [`docs/ps.md`](docs/ps.md) — the problem, with sourced evidence
-- [`docs/demo-script.md`](docs/demo-script.md) — demo video script
-- [`docs/blog-post.md`](docs/blog-post.md) — write-up draft
-- [`docs/submission.md`](docs/submission.md) — submission checklist and open items
 
 ---
 
