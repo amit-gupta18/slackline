@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: slackline-api
+    runtime: node
+    plan: free
+    buildCommand: corepack enable && pnpm install --frozen-lockfile
+    startCommand: pnpm exec tsx apps/api/src/index.ts
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: GRAPH_NAME
+        value: slackline
+      - key: FALKOR_URL
+        sync: false
+      - key: FALKOR_PASSWORD
+        sync: false
+      - key: FALKOR_USERNAME
+        sync: false
+      - key: WEB_ORIGIN
+        sync: false
