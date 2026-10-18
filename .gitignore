@@ -1,0 +1,15 @@
+node_modules/
+docs/
+dist/
+.next/
+*.tsbuildinfo
+
+# Secrets — the FalkorDB URL is a credential. Never commit these.
+.env
+.env.*
+!.env.example
+.mcp.json
+!.mcp.json.example
+
+*.log
+.DS_Store

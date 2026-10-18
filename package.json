@@ -1,0 +1,33 @@
+{
+  "name": "slackline",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Graph-native cascade containment for airline operations",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "smoke": "tsx scripts/smoke.ts",
+    "seed": "tsx scripts/seed.ts",
+    "demo": "tsx scripts/demo.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b",
+    "lint:boundary": "node scripts/check-boundary.mjs",
+    "dev:api": "tsx watch apps/api/src/index.ts",
+    "mcp": "tsx apps/mcp/src/index.ts",
+    "dev:web": "pnpm --filter @slackline/web dev",
+    "build:web": "pnpm --filter @slackline/web build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "falkordb": "^6.2.7"
+  }
+}
